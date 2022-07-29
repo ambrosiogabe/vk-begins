@@ -1,0 +1,9 @@
+[submodule "VulkanBegins/vendor/glm"]
+	path = VulkanBegins/vendor/glm
+	url = https://github.com/g-truc/glm
+[submodule "VulkanBegins/vendor/GLFW"]
+	path = VulkanBegins/vendor/GLFW
+	url = https://github.com/glfw/glfw
+[submodule "VulkanBegins/vendor/cppUtils"]
+	path = VulkanBegins/vendor/cppUtils
+	url = https://github.com/ambrosiogabe/CppUtils
