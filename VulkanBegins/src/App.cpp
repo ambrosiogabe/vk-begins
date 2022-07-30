@@ -13,6 +13,19 @@
 #include <array>
 #include <vector>
 
+// ------------ Internal structures ------------
+constexpr uint32 NullQueueFamily = UINT32_MAX;
+
+struct QueueFamilyIndices
+{
+	uint32 graphicsFamily;
+
+	inline bool isComplete()
+	{
+		return graphicsFamily != NullQueueFamily;
+	}
+};
+
 // ------------ Internal Variables ------------
 const std::array<const char*, 1> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -31,9 +44,17 @@ static GLFWwindow* window;
 
 static VkInstance vkInstance;
 static VkDebugUtilsMessengerEXT debugMessenger;
+static VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+static VkDevice logicalDevice;
+static VkQueue graphicsQueue;
 
 // ------------ Internal Functions ------------
+static void initVulkan();
 static void createInstance();
+static void pickPhysicalDevice();
+static void createLogicalDevice();
+static bool isDeviceSuitable(VkPhysicalDevice device);
+static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
 static bool checkForRequiredExts(const std::vector<const char*>& requiredExts);
 static bool checkValidationLayerSupport();
 static std::vector<const char*> getRequiredExtensions();
@@ -61,7 +82,7 @@ void vkb_app_init()
 		return;
 	}
 
-	createInstance();
+	initVulkan();
 
 	g_logger_info("Successfully initialized Vulkan.");
 }
@@ -76,19 +97,27 @@ void vkb_app_run()
 
 void vkb_app_free()
 {
+	vkDestroyDevice(logicalDevice, nullptr);
+
 	if (enableValidationLayers)
 	{
 		DestroyDebugUtilsMessengerEXT(vkInstance, debugMessenger, nullptr);
 	}
 
 	vkDestroyInstance(vkInstance, nullptr);
-
 	glfwDestroyWindow(window);
-
 	glfwTerminate();
 }
 
 // ------------ Internal Functions ------------
+static void initVulkan()
+{
+	createInstance();
+	setupDebugMessenger();
+	pickPhysicalDevice();
+	createLogicalDevice();
+}
+
 static void createInstance()
 {
 	VkApplicationInfo appInfo{};
@@ -126,8 +155,126 @@ static void createInstance()
 
 	VkResult result = vkCreateInstance(&createInfo, nullptr, &vkInstance);
 	g_logger_assert(result == VK_SUCCESS, "Failed to create vulkan instance.");
-	
-	setupDebugMessenger();
+}
+
+static void pickPhysicalDevice()
+{
+	uint32 deviceCount = 0;
+	vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
+	g_logger_assert(deviceCount != 0, "No Graphics Cards found.");
+
+	VkPhysicalDevice* devices = (VkPhysicalDevice*)g_memory_allocate(sizeof(VkPhysicalDevice) * deviceCount);
+	vkEnumeratePhysicalDevices(vkInstance, &deviceCount, devices);
+
+	for (uint32 devicei = 0; devicei < deviceCount; devicei++)
+	{
+		if (isDeviceSuitable(devices[devicei]))
+		{
+			physicalDevice = devices[devicei];
+			break;
+		}
+	}
+
+	g_memory_free(devices);
+
+	g_logger_assert(physicalDevice != VK_NULL_HANDLE, "Failed to find suitable graphics card for Vulkan.");
+
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+	g_logger_info("Found suitable device: '%s'", deviceProperties.deviceName);
+}
+
+static void createLogicalDevice()
+{
+	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+	constexpr uint32 numQueueFamilies = 1;
+	VkDeviceQueueCreateInfo* queueCreateInfo = (VkDeviceQueueCreateInfo*)g_memory_allocate(sizeof(VkDeviceQueueCreateInfo) * numQueueFamilies);
+	g_memory_zeroMem(queueCreateInfo, sizeof(VkDeviceQueueCreateInfo) * numQueueFamilies);
+
+	queueCreateInfo[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queueCreateInfo[0].queueFamilyIndex = indices.graphicsFamily;
+	queueCreateInfo[0].queueCount = 1;
+
+	float queuePriority = 1.0f;
+	queueCreateInfo[0].pQueuePriorities = &queuePriority;
+
+	VkPhysicalDeviceFeatures deviceFeatures{};
+
+	VkDeviceCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	createInfo.pQueueCreateInfos = queueCreateInfo;
+	createInfo.queueCreateInfoCount = numQueueFamilies;
+
+	createInfo.pEnabledFeatures = &deviceFeatures;
+	createInfo.enabledExtensionCount = 0;
+
+	if (enableValidationLayers)
+	{
+		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+		createInfo.ppEnabledLayerNames = validationLayers.data();
+	}
+	else
+	{
+		createInfo.enabledLayerCount = 0;
+	}
+
+	VkResult result = vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice);
+	g_logger_assert(result == VK_SUCCESS, "failed to create logical device!");
+
+	// List of Queues
+	// [0]: Graphics Queue
+	// [1]: Memory Transfer Queue
+	vkGetDeviceQueue(logicalDevice, indices.graphicsFamily, 0, &graphicsQueue);
+	//vkGetDeviceQueue(logicalDevice, indices.transferQueue, 1, &graphicsQueue);
+
+	g_memory_free(queueCreateInfo);
+}
+
+static bool isDeviceSuitable(VkPhysicalDevice device)
+{
+	// TODO: Can use these and check for certain properties
+	// VkPhysicalDeviceProperties deviceProperties;
+	// vkGetPhysicalDeviceProperties(device, &deviceProperties);
+	// 
+	// VkPhysicalDeviceFeatures deviceFeatures;
+	// vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+	QueueFamilyIndices indices = findQueueFamilies(device);
+	return indices.isComplete();
+}
+
+static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
+{
+	QueueFamilyIndices indices;
+	indices.graphicsFamily = NullQueueFamily;
+
+	// NOTE: We look for a queue family suitable to store graphics commands
+	// which is our requirements for a suitable device
+	// Logic to find graphics queue family
+	uint32 queueFamilyCount = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+	VkQueueFamilyProperties* queueFamilies = (VkQueueFamilyProperties*)g_memory_allocate(sizeof(VkQueueFamilyProperties) * queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies);
+
+	for (uint32 familyi = 0; familyi < queueFamilyCount; familyi++)
+	{
+		const VkQueueFamilyProperties& queueFamily = queueFamilies[familyi];
+		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+		{
+			indices.graphicsFamily = familyi;
+		}
+
+		if (indices.isComplete())
+		{
+			break;
+		}
+	}
+
+	g_memory_free(queueFamilies);
+
+	return indices;
 }
 
 static bool checkForRequiredExts(const std::vector<const char*>& requiredExts)
@@ -260,7 +407,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 	void* pUserData)
 {
-	if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) 
+	if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 	{
 		g_logger_error("Validation Layer: \n\t%s", pCallbackData->pMessage);
 	}
