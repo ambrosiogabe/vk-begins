@@ -3,7 +3,7 @@
 
 int main()
 {
-    g_memory_init(true);
+    g_memory_init(true, 1024);
 
     vkb_app_init();
     vkb_app_run();
